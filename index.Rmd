@@ -46,92 +46,249 @@ class_diag <- function(score, truth, positive, cutoff=.5){
 
 # Mining, Classification, Prediction
 
-## Name and EID here
+## Jack Rickman jhr2368
 
 ### Introduction 
 
-Paragraph or two introducing your datasets and variables, why they are interesting to you, etc. See instructions for more information
+*In this project, I will using the Austin, TX House Listings dataset from Kaggle (URL: https://www.kaggle.com/ericpierce/austinhousingprices). The features of this dataset are from January 2021. There are 15171 listings with 45 features, but I will only  use 13 of them. Here is a description of all of the variables:* 
+
+#### 1. num: garageSpaces; Number of garage spaces. This is a subset of the ParkingSpaces feature.
+#### 2. bool: hasAssociation; Indicates if there is a Homeowners Association associated with the listing. (T/F:8007:7164)
+#### 3. bool: hasSpa; Boolean indicating if the home has a Spa (T/F: 1199:14k)
+#### 4. num: parkingSpaces; The number of parking spots that come with a home.
+#### 5. date: yearBuilt; The year the property was built.
+#### 6. num; latestPrice; The most recent available price at time of data acquisition.
+#### 7. num; numOfBedrooms; The number of bedrooms in a property.
+#### 8. num; numOfStories; The number of stories a property has.
+#### 9. num; numOfBathrooms; The number of bathrooms in a property.
+#### 10. num; livingAreaSqFt; The living area of the property reported in Square Feet.
+#### 11. num; lotSizeSqFt; The lot size of the property reported in Square Feet.
+#### 12. num; numOfSecurityFeatures; The number of unique security features in the Zillow listing.
+#### 13. num; numOfAppliances; The number of unique appliances in the Zillow listing.
+
 
 ```{R}
 library(tidyverse)
 # read your datasets in here, e.g., with read_csv()
+austinHousingData <- read.csv("~/Downloads/austinHousingData.csv", comment.char="#")
+# dim(austinHousingData)
+attach(austinHousingData)
+str(austinHousingData)
+df_num <- austinHousingData %>% select(latestPrice,numOfBedrooms, numOfStories, numOfBathrooms, garageSpaces, parkingSpaces,livingAreaSqFt, lotSizeSqFt, numOfSecurityFeatures, numOfAppliances, yearBuilt ) %>% as.data.frame() %>% mutate_if(is.character,as.numeric)
+df_bool <- austinHousingData %>% select(hasAssociation, hasSpa)  %>% as.data.frame() %>% mutate_if(is.character,as.logical)
 
-# if your dataset needs tidying, do so here
+df <- bind_cols(df_num, df_bool)
+dim(df)
+# See how many NA's per variable
+df %>%select(everything()) %>% summarise_all(funs(sum(is.na(.))))
+# Remove NA's
+df <- df %>% na.omit()
+# Check to see no more NA's
+map(df, ~sum(is.na(.))) 
 
-# any other code here
 ```
 
 ### Cluster Analysis
 
 ```{R}
-library(cluster)
-# clustering code here
+library(cluster) #load the cluster package
+library(ggplot2)
+library(GGally)
+set.seed(322) #just makes our output match
+
+df_scale1 <- df %>% select(livingAreaSqFt, lotSizeSqFt, numOfBedrooms, latestPrice) %>% scale %>% as.data.frame()  
+df_scale1  <-  cbind(df_scale1, hasAssociation = df$hasAssociation)
+
+# Goodness-of-Fit and Number of Clusters in PAM
+sil_width<-vector()
+for(i in 2:10){  
+  pam_fit <- pam(df_scale1, k = i)  
+  sil_width[i] <- pam_fit$silinfo$avg.width  
+}
+ggplot()+geom_line(aes(x=1:10,y=sil_width))+scale_x_continuous(name="k",breaks=1:10)
+
+# From the plot, the suggested number of clusters is 8. Next we’ll classify the
+# observations into 8 clusters. The average silhouette width shows there is a
+# weak structure, ~0.46.
+pam8 <- pam(df_scale1, k = 8)
+plot(pam8,which=2)
+
+# graph clusters of each pair of variables
+pamclust<-df_scale1 %>% mutate(cluster=as.factor(pam8$clustering))
+
+ggpairs(pamclust, ggplot2::aes(color=cluster))
+
+# Summarize clusters & interpret
+pamclust %>% group_by(cluster) %>% summarize_if(is.numeric,mean,na.rm=T)
+
 ```
 
-Discussion of clustering here
+*We see that the PAM clustering did not seperate the groups very clearly. The cluster that is most interesting is the 6th cluster. It shows that the living area square feet for cluster 6 has values 2.26 deviations above the overall average. Also the latest price for cluster 6 has values 4.18 deviations above the overall average. Not really any of the other clusters are very interesting. The overall goodness of fit is not good from the weak average silhouette width of 0.46.*
     
     
 ### Dimensionality Reduction with PCA
 
 ```{R}
-# PCA code here
+library(factoextra)
+pca<- df %>% select_if(is.numeric) %>% prcomp(scale = TRUE)
+summary(pca, loadings=T)
+
+fviz_pca_biplot(pca, geom = c("point"))
+
+eigval<-pca$sdev^2 #square to convert SDs to eigenvalues
+varprop=round(eigval/sum(eigval), 2) #proportion of var explained by each PC
+ggplot() + geom_bar(aes(y=varprop, x=1:11), stat="identity") + xlab("") + geom_path(aes(y=varprop, x=1:11)) + geom_text(aes(x=1:11, y=varprop, label=round(varprop, 2)), col="white") + scale_y_continuous(breaks=seq(0, .6, .2)) + scale_x_continuous(breaks=1:11)
+
+# We will keep 6 principle components for it gives us a cumulative proportion of
+# variance above 80%.
+
+# highest PC1
+pca$x[,1:6] %>% as.data.frame %>% arrange(desc(PC1)) %>% head(3)
+# lowest PC1
+pca$x[,1:6] %>% as.data.frame %>% arrange(PC1) %>% head(3)
+# highest on PC2
+pca$x[,1:6] %>% as.data.frame %>% arrange(desc(PC2)) %>% head(3)
+# lowest on PC2
+pca$x[,1:6] %>% as.data.frame %>% arrange(PC2) %>% head(3)
+# highest on PC3
+pca$x[,1:6] %>% as.data.frame %>% arrange(desc(PC3)) %>% head(3)
+# lowest on PC3
+pca$x[,1:6] %>% as.data.frame %>% arrange(PC3) %>% head(3)
+# highest on PC4
+pca$x[,1:6] %>% as.data.frame %>% arrange(desc(PC4)) %>% head(3)
+# lowest on PC4
+pca$x[,1:6] %>% as.data.frame %>% arrange(PC4) %>% head(3)
+# highest on PC5
+pca$x[,1:6] %>% as.data.frame %>% arrange(desc(PC5)) %>% head(3)
+# lowest on PC5
+pca$x[,1:6] %>% as.data.frame %>% arrange(PC5) %>% head(3)
+# highest on PC6
+pca$x[,1:6] %>% as.data.frame %>% arrange(desc(PC6)) %>% head(3)
+# lowest on PC6
+pca$x[,1:6] %>% as.data.frame %>% arrange(PC6) %>% head(3)
+
 ```
 
-Discussions of PCA here. 
+*These are the highest and lowest scores of each of the principle components that we keep. When we keep the first 6 components, this explains 81% of the variance of the total data set. When we look at some of the scores of our observations,  we find that observation 705 scores the highest on the 1st PC and the lowest on the 2nd PC. Also this observation scored the 2nd lowest on the 3rd PC!*
 
 ###  Linear Classifier
 
 ```{R}
-# linear classifier code here
+library(caret)
+# We will be using logistic regression for our linear classifier.
+df1 <- df %>% select(hasAssociation, latestPrice,numOfBedrooms, numOfStories, numOfBathrooms, garageSpaces, parkingSpaces,livingAreaSqFt, lotSizeSqFt, numOfSecurityFeatures, numOfAppliances, yearBuilt )
+df1$hasAssociation <- as.factor(1*df1$hasAssociation)
+fit <- glm(hasAssociation~., data = df1, family = "binomial")
+score <- predict(fit, type="response")
+class_diag(score,truth=df1$hasAssociation, positive=1)
+# Pretty good AUC at about 91% ! 
+df1$pred_glm <- ifelse(score > 0.5, 1, 0)
+confusionMatrix(as.factor(df1$hasAssociation), as.factor(df1$pred_glm))
+# Our confusion matrix has the model at about 86% accuracy!
 ```
 
 ```{R}
-# cross-validation of linear classifier here
+# k-fold CV
+set.seed(1234)
+k=10 #let's use k=5, since our dataset is medium size
+folds<-cut(seq(1:nrow(df1)),breaks=k,labels=F) #create folds
+diags<-NULL
+for(i in 1:k){
+  ## Create training and test sets
+  train<-df1[folds!=i,] 
+  test<-df1[folds==i,]
+  truth<-test$hasAssociation
+  ## Train model on training set
+  fit<-glm(hasAssociation~.,data=train,family="binomial")
+  probs<-predict(fit,newdata = test,type="response")
+  ## Test model on test set (save all k results)
+  diags<-rbind(diags,class_diag(probs,truth, positive=1))
+}
+summarize_all(diags,mean)
 ```
 
-Discussion here
+*WE see that the cross validation logistic regression model does slighlty worse compared to the model training on all the observations. We expect this because we were probably overfitting the model. The 87% AUC will probably be much more of an accurate representation of the logistic model!*
 
 ### Non-Parametric Classifier
 
 ```{R}
-library(caret)
-# non-parametric classifier code here
+fit<-knn3(hasAssociation~.,data=df1)
+score <- predict(fit, newdata = df1)[,2]
+class_diag(score,truth=df1$hasAssociation, positive=1)
+df1$pred_knn <- ifelse(score > 0.5, 1, 0)
+confusionMatrix(as.factor(df1$hasAssociation), as.factor(df1$pred_knn))
 ```
 
 ```{R}
-# cross-validation of np classifier here
+# k-fold CV
+set.seed(1234)
+k=10 #let's use k=5, since our dataset is medium size
+folds<-cut(seq(1:nrow(df1)),breaks=k,labels=F) #create folds
+diags<-NULL
+for(i in 1:k){
+  ## Create training and test sets
+  train<-df1[folds!=i,] 
+  test<-df1[folds==i,]
+  truth<-test$hasAssociation
+  ## Train model on training set
+  fit<-knn3(hasAssociation~.,data=train)
+  probs<-predict(fit,newdata = test)[,2]
+  ## Test model on test set (save all k results)
+  diags<-rbind(diags,class_diag(probs,truth, positive=1))
+}
+summarize_all(diags,mean)
 ```
 
-Discussion
+*Now for k-near-neighbors model when training on all the observations, gives us an AUC of about 89%. This is very accurate, but knn uses the observations closest to it to make predictions so that model most likely suffers from overfitting. Thus we see in the cross-validation model for knn that the AUC drops to about 70%. This model doesn't lack from overfitting and makes much more clear the value this knn model brings to this prediction.*
 
 
 ### Regression/Numeric Prediction
 
 ```{R}
-# regression model code here
+library(rpart)
+library(rpart.plot)
+fit<-train(latestPrice~lotSizeSqFt+numOfBedrooms+hasAssociation+hasSpa+yearBuilt,data=df, method="rpart")
+rpart.plot(fit$finalModel,digits=4)
+mean(fit$results$RMSE^2) # Average MSE
 ```
 
 ```{R}
-# cross-validation of regression model here
+# cross-validation of regression tree
+set.seed(1234)
+cv <- trainControl(method="cv", number = 10, classProbs = T, savePredictions = T)
+fit<-train(latestPrice~lotSizeSqFt+numOfBedrooms+as.factor(hasAssociation)+as.factor(hasSpa)+yearBuilt,data=df, trControl=cv, method="rpart")
+mean(fit$results$RMSE^2) # average MSE
 ```
 
-Discussion
+*For the regression tree method the model did very poorly. It did not have much accuracy. We have 1xe11 mean square average error term! Practically we would stay away from this model or add different variables that has better predicting power than the current variables.*
 
 ### Python 
 
 ```{R}
 library(reticulate)
+use_python("/usr/bin/python3", required = F)
 ```
 
 ```{python}
-# python code here
+from statistics import mean
+from statistics import median
+from statistics import mode
+
+x = r.df["latestPrice"]
+x_mean = mean(x)
+x_median = median(x)
+x_mode = mode(x)
 ```
 
-Discussion
+```{r}
+py$x_mean
+py$x_median
+py$x_mode
+```
 
-### Concluding Remarks
+*From the python code chuck, I got the mean, median, and mode of the latestPrice variable from R. I imported mean, median and mode from the statistics library in python. Then outputed the results back in a R chuck.*
 
-Include concluding remarks here, if any
+
 
 
 
